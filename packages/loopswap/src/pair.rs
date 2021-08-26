@@ -18,10 +18,10 @@ pub struct InstantiateMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    /*UpdateConfig {
+    UpdateConfig {
         owner: Option<String>,
         stake: Option<String>,
-    },*/
+    },
     Receive(Cw20ReceiveMsg),
     /// ProvideLiquidity a user provides pool liquidity
     ProvideLiquidity {
@@ -36,8 +36,8 @@ pub enum ExecuteMsg {
         max_spread: Option<Decimal>,
         to: Option<String>,
     },
-    /*SendToStake {
-    },*/
+    SendToStake {
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

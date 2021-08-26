@@ -110,7 +110,7 @@ pub fn execute_update_pair_config(
         return Err(StdError::generic_err("unauthorized"));
     }
     Ok(Response::new()
-        /*.add_attributes(vec![
+        .add_attributes(vec![
             ("action", "update pair config"),
         ])
         .add_submessage(SubMsg {
@@ -126,7 +126,7 @@ pub fn execute_update_pair_config(
             }
             .into(),
             reply_on: ReplyOn::Success,
-        })*/)
+        }))
 }
 
 // Anyone can execute it to create swap pair

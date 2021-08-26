@@ -1,6 +1,6 @@
 use crate::error::ContractError;
 use crate::response::MsgInstantiateContractResponse;
-use crate::state::{Config, CONFIG, PAIR_INFO, REWARD_INFO, REWARD2_INFO};
+use crate::state::{Config, CONFIG, PAIR_INFO, REWARD2_INFO, REWARD_INFO};
 
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
@@ -13,8 +13,6 @@ use cosmwasm_std::{
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use integer_sqrt::IntegerSquareRoot;
-use protobuf::Message;
-use std::str::FromStr;
 use loopswap::asset::{Asset, AssetInfo, PairInfo, PairInfoRaw};
 use loopswap::pair::{
     Cw20HookMsg, ExecuteMsg, InstantiateMsg, MigrateMsg, PoolResponse, QueryMsg,
@@ -22,11 +20,15 @@ use loopswap::pair::{
 };
 use loopswap::querier::query_supply;
 use loopswap::token::InstantiateMsg as TokenInstantiateMsg;
+use protobuf::Message;
+use std::str::FromStr;
 
 const INSTANTIATE_REPLY_ID: u64 = 1;
 
 /// Commission rate == 0.3%
 const COMMISSION_RATE: &str = "0.003";
+/// 25% will be deducted from commission for stakers
+const STAKE_REWARD_FROM_COMMISSION: &str = "0.25";
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
@@ -40,7 +42,7 @@ pub fn instantiate(
     };
 
     CONFIG.save(deps.storage, &config)?;
-    
+
     let pair_info: &PairInfoRaw = &PairInfoRaw {
         contract_addr: deps.api.addr_canonicalize(env.contract.address.as_str())?,
         liquidity_token: CanonicalAddr::from(vec![]),
@@ -130,6 +132,10 @@ pub fn execute(
                 to_addr,
             )
         }
+        ExecuteMsg::UpdateConfig { owner, stake } => {
+            execute_update_config(deps, env, info, owner, stake)
+        }
+        ExecuteMsg::SendToStake {} => execute_send_to_stake(deps, env, info),
     }
 }
 
@@ -150,8 +156,17 @@ pub fn receive_cw20(
             // only asset contract can execute this message
             let mut authorized: bool = false;
             let config: PairInfoRaw = PAIR_INFO.load(deps.storage)?;
-            let pools: [Asset; 2] =
+            let mut pools: [Asset; 2] =
                 config.query_pools(&deps.querier, deps.api, env.contract.address.clone())?;
+            let rewards: [Asset; 2] = [
+                REWARD_INFO.load(deps.storage)?,
+                REWARD2_INFO.load(deps.storage)?,
+            ];
+            let config: Config = CONFIG.load(deps.storage)?;
+            if !config.stake.is_none() {
+                pools[0].amount = pools[0].amount.checked_sub(rewards[0].amount).unwrap();
+                pools[1].amount = pools[1].amount.checked_sub(rewards[1].amount).unwrap();
+            }
             for pool in pools.iter() {
                 if let AssetInfo::Token { contract_addr, .. } = &pool.info {
                     if contract_addr == &info.sender {
@@ -234,6 +249,15 @@ pub fn provide_liquidity(
     let pair_info: PairInfoRaw = PAIR_INFO.load(deps.storage)?;
     let mut pools: [Asset; 2] =
         pair_info.query_pools(&deps.querier, deps.api, env.contract.address.clone())?;
+    let rewards: [Asset; 2] = [
+        REWARD_INFO.load(deps.storage)?,
+        REWARD2_INFO.load(deps.storage)?,
+    ];
+    let config: Config = CONFIG.load(deps.storage)?;
+    if !config.stake.is_none() {
+        pools[0].amount = pools[0].amount.checked_sub(rewards[0].amount).unwrap();
+        pools[1].amount = pools[1].amount.checked_sub(rewards[1].amount).unwrap();
+    }
     let deposits: [Uint128; 2] = [
         assets
             .iter()
@@ -325,7 +349,16 @@ pub fn withdraw_liquidity(
     let pair_info: PairInfoRaw = PAIR_INFO.load(deps.storage)?;
     let liquidity_addr: Addr = deps.api.addr_humanize(&pair_info.liquidity_token)?;
 
-    let pools: [Asset; 2] = pair_info.query_pools(&deps.querier, deps.api, env.contract.address)?;
+    let mut pools: [Asset; 2] = pair_info.query_pools(&deps.querier, deps.api, env.contract.address)?;
+    let rewards: [Asset; 2] = [
+        REWARD_INFO.load(deps.storage)?,
+        REWARD2_INFO.load(deps.storage)?,
+    ];
+    let config: Config = CONFIG.load(deps.storage)?;
+    if !config.stake.is_none() {
+        pools[0].amount = pools[0].amount.checked_sub(rewards[0].amount).unwrap();
+        pools[1].amount = pools[1].amount.checked_sub(rewards[1].amount).unwrap();
+    }
     let total_share: Uint128 = query_supply(&deps.querier, liquidity_addr)?;
 
     let share_ratio: Decimal = Decimal::from_ratio(amount, total_share);
@@ -383,7 +416,16 @@ pub fn swap(
 
     let pair_info: PairInfoRaw = PAIR_INFO.load(deps.storage)?;
 
-    let pools: [Asset; 2] = pair_info.query_pools(&deps.querier, deps.api, env.contract.address)?;
+    let mut pools: [Asset; 2] = pair_info.query_pools(&deps.querier, deps.api, env.contract.address)?;
+    let rewards: [Asset; 2] = [
+        REWARD_INFO.load(deps.storage)?,
+        REWARD2_INFO.load(deps.storage)?,
+    ];
+    let config: Config = CONFIG.load(deps.storage)?;
+    if !config.stake.is_none() {
+        pools[0].amount = pools[0].amount.checked_sub(rewards[0].amount).unwrap();
+        pools[1].amount = pools[1].amount.checked_sub(rewards[1].amount).unwrap();
+    }
 
     let offer_pool: Asset;
     let ask_pool: Asset;
@@ -407,7 +449,7 @@ pub fn swap(
     }
 
     let offer_amount = offer_asset.amount;
-    let (return_amount, spread_amount, commission_amount) =
+    let (return_amount, spread_amount, commission_amount, reward_stake_amount) =
         compute_swap(offer_pool.amount, ask_pool.amount, offer_amount);
 
     // check max spread limit if exist
@@ -448,6 +490,88 @@ pub fn swap(
         ("commission_amount", &commission_amount.to_string()),
     ]))
 }
+// Only owner can execute it
+pub fn execute_update_config(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    owner: Option<String>,
+    stake: Option<String>,
+) -> Result<Response, ContractError> {
+    let mut config: Config = CONFIG.load(deps.storage)?;
+
+    // permission check
+    if deps.api.addr_canonicalize(info.sender.as_str())? != config.owner {
+        return Ok(Response::new().add_attribute("error", "unauthorized"));
+    } else {
+        if let Some(owner) = owner {
+            // validate address format
+            let _ = deps.api.addr_validate(&owner)?;
+
+            config.owner = deps.api.addr_canonicalize(&owner)?;
+        }
+
+        if let Some(stake) = stake {
+            let _ = deps.api.addr_validate(&stake)?;
+
+            config.stake = Some(stake);
+        }
+
+        CONFIG.save(deps.storage, &config)?;
+    }
+
+    Ok(Response::new().add_attribute("action", "update_config"))
+}
+
+pub fn execute_send_to_stake(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+) -> Result<Response, ContractError> {
+    let config: Config = CONFIG.load(deps.storage)?;
+
+    if !config.stake.is_none() {
+        let mut rewards: [Asset; 2] = [
+            REWARD_INFO.load(deps.storage)?,
+            REWARD2_INFO.load(deps.storage)?,
+        ];
+        let mut messages: Vec<CosmosMsg> = vec![];
+        //TRANSFER FROM
+        let stake: String = config.stake.unwrap();
+        if rewards[0].amount != Uint128::zero() {
+            if let AssetInfo::Token { contract_addr, .. } = &rewards[0].info {
+                messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_addr.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::TransferFrom {
+                        owner: info.sender.to_string(),
+                        recipient: stake.clone(),
+                        amount: rewards[0].amount,
+                    })?,
+                    funds: vec![],
+                }));
+                rewards[0].amount = Uint128::zero();
+                REWARD_INFO.save(deps.storage, &rewards[0])?;
+            }
+        }
+        if rewards[1].amount != Uint128::zero() {
+            if let AssetInfo::Token { contract_addr, .. } = &rewards[1].info {
+                messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_addr.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::TransferFrom {
+                        owner: info.sender.to_string(),
+                        recipient: stake,
+                        amount: rewards[1].amount,
+                    })?,
+                    funds: vec![],
+                }));
+                rewards[1].amount = Uint128::zero();
+                REWARD2_INFO.save(deps.storage, &rewards[1])?;
+            }
+        }
+    }
+
+    Ok(Response::new())
+}
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
@@ -473,7 +597,16 @@ pub fn query_pair_info(deps: Deps) -> Result<PairInfo, ContractError> {
 pub fn query_pool(deps: Deps) -> Result<PoolResponse, ContractError> {
     let pair_info: PairInfoRaw = PAIR_INFO.load(deps.storage)?;
     let contract_addr = deps.api.addr_humanize(&pair_info.contract_addr)?;
-    let assets: [Asset; 2] = pair_info.query_pools(&deps.querier, deps.api, contract_addr)?;
+    let mut assets: [Asset; 2] = pair_info.query_pools(&deps.querier, deps.api, contract_addr)?;
+    let rewards: [Asset; 2] = [
+        REWARD_INFO.load(deps.storage)?,
+        REWARD2_INFO.load(deps.storage)?,
+    ];
+    let config: Config = CONFIG.load(deps.storage)?;
+    if !config.stake.is_none() {
+        assets[0].amount = assets[0].amount.checked_sub(rewards[0].amount).unwrap();
+        assets[1].amount = assets[1].amount.checked_sub(rewards[1].amount).unwrap();
+    }
     let total_share: Uint128 = query_supply(
         &deps.querier,
         deps.api.addr_humanize(&pair_info.liquidity_token)?,
@@ -494,7 +627,16 @@ pub fn query_simulation(
     let pair_info: PairInfoRaw = PAIR_INFO.load(deps.storage)?;
 
     let contract_addr = deps.api.addr_humanize(&pair_info.contract_addr)?;
-    let pools: [Asset; 2] = pair_info.query_pools(&deps.querier, deps.api, contract_addr)?;
+    let mut  pools: [Asset; 2] = pair_info.query_pools(&deps.querier, deps.api, contract_addr)?;
+    let rewards: [Asset; 2] = [
+        REWARD_INFO.load(deps.storage)?,
+        REWARD2_INFO.load(deps.storage)?,
+    ];
+    let config: Config = CONFIG.load(deps.storage)?;
+    if !config.stake.is_none() {
+        pools[0].amount = pools[0].amount.checked_sub(rewards[0].amount).unwrap();
+        pools[1].amount = pools[1].amount.checked_sub(rewards[1].amount).unwrap();
+    }
 
     let offer_pool: Asset;
     let ask_pool: Asset;
@@ -508,9 +650,8 @@ pub fn query_simulation(
         return Err(ContractError::AssetMismatch {});
     }
 
-    let (return_amount, spread_amount, commission_amount) =
+    let (return_amount, spread_amount, commission_amount, reward_stake_amount) =
         compute_swap(offer_pool.amount, ask_pool.amount, offer_asset.amount);
-    let reward_stake_amount=Uint128::zero();
     Ok(SimulationResponse {
         return_amount,
         spread_amount,
@@ -526,7 +667,16 @@ pub fn query_reverse_simulation(
     let pair_info: PairInfoRaw = PAIR_INFO.load(deps.storage)?;
 
     let contract_addr = deps.api.addr_humanize(&pair_info.contract_addr)?;
-    let pools: [Asset; 2] = pair_info.query_pools(&deps.querier, deps.api, contract_addr)?;
+    let mut pools: [Asset; 2] = pair_info.query_pools(&deps.querier, deps.api, contract_addr)?;
+    let rewards: [Asset; 2] = [
+        REWARD_INFO.load(deps.storage)?,
+        REWARD2_INFO.load(deps.storage)?,
+    ];
+    let config: Config = CONFIG.load(deps.storage)?;
+    if !config.stake.is_none() {
+        pools[0].amount = pools[0].amount.checked_sub(rewards[0].amount).unwrap();
+        pools[1].amount = pools[1].amount.checked_sub(rewards[1].amount).unwrap();
+    }
 
     let offer_pool: Asset;
     let ask_pool: Asset;
@@ -561,7 +711,7 @@ fn compute_swap(
     offer_pool: Uint128,
     ask_pool: Uint128,
     offer_amount: Uint128,
-) -> (Uint128, Uint128, Uint128) {
+) -> (Uint128, Uint128, Uint128, Uint128) {
     let offer_pool: Uint256 = offer_pool.into();
     let ask_pool: Uint256 = ask_pool.into();
     let offer_amount: Uint256 = offer_amount.into();
@@ -578,14 +728,22 @@ fn compute_swap(
     // calculate spread & commission
     let spread_amount: Uint256 =
         (offer_amount * Decimal256::from_ratio(ask_pool, offer_pool)) - return_amount;
-    let commission_amount: Uint256 = return_amount * commission_rate;
+    let mut commission_amount: Uint256 = return_amount * commission_rate;
 
     // commission will be absorbed to pool
     let return_amount: Uint256 = return_amount - commission_amount;
+
+
+
+    //reward_stake_amount
+    let reward_stake_amount: Uint256 =
+        commission_amount * Decimal256::from_str(&STAKE_REWARD_FROM_COMMISSION).unwrap();
+    commission_amount = commission_amount-reward_stake_amount;
     (
         return_amount.into(),
         spread_amount.into(),
         commission_amount.into(),
+        reward_stake_amount.into(),
     )
 }
 

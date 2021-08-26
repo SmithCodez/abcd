@@ -32,6 +32,7 @@ fn proper_initialization() {
             },
         ],
         token_code_id: 10u64,
+        stake: Some("stake".to_string()),
     };
 
     // we can just call .unwrap() to assert this was a success
@@ -122,6 +123,7 @@ fn provide_liquidity() {
             },
         ],
         token_code_id: 10u64,
+        stake: Some("stake".to_string()),
     };
 
     let env = mock_env();
@@ -532,6 +534,7 @@ fn withdraw_liquidity() {
             },
         ],
         token_code_id: 10u64,
+        stake: Some("stake".to_string()),
     };
 
     let env = mock_env();
@@ -653,6 +656,7 @@ fn try_native_to_token() {
             },
         ],
         token_code_id: 10u64,
+        stake: Some("stake".to_string()),
     };
 
     let env = mock_env();
@@ -705,10 +709,12 @@ fn try_native_to_token() {
     let expected_spread_amount = (offer_amount * exchange_rate)
         .checked_sub(expected_ret_amount)
         .unwrap();
-    let expected_commission_amount = expected_ret_amount.multiply_ratio(3u128, 1000u128); // 0.3%
+    let mut expected_commission_amount = expected_ret_amount.multiply_ratio(3u128, 1000u128); // 0.3%
     let expected_return_amount = expected_ret_amount
         .checked_sub(expected_commission_amount)
         .unwrap();
+    let reward_stake_amount = expected_commission_amount.multiply_ratio(25u128, 100u128); // 0.3%
+    expected_commission_amount = expected_commission_amount - reward_stake_amount;
     let expected_tax_amount = Uint128::zero(); // no tax for token
 
     // check simulation res
@@ -751,7 +757,7 @@ fn try_native_to_token() {
             < 3i128
     );
     assert!(
-        (expected_commission_amount.u128() as i128
+        (expected_commission_amount.u128() as i128 + reward_stake_amount.u128() as i128
             - reverse_simulation_res.commission_amount.u128() as i128)
             .abs()
             < 3i128
@@ -833,6 +839,7 @@ fn try_token_to_native() {
             },
         ],
         token_code_id: 10u64,
+        stake: Some("stake".to_string()),
     };
 
     let env = mock_env();
@@ -899,10 +906,12 @@ fn try_token_to_native() {
     let expected_spread_amount = (offer_amount * exchange_rate)
         .checked_sub(expected_ret_amount)
         .unwrap();
-    let expected_commission_amount = expected_ret_amount.multiply_ratio(3u128, 1000u128); // 0.3%
+    let mut expected_commission_amount = expected_ret_amount.multiply_ratio(3u128, 1000u128); // 0.3%
     let expected_return_amount = expected_ret_amount
         .checked_sub(expected_commission_amount)
         .unwrap();
+    let reward_stake_amount = expected_commission_amount.multiply_ratio(25u128, 100u128); // 0.3%
+    expected_commission_amount = expected_commission_amount - reward_stake_amount;
     let expected_tax_amount = std::cmp::min(
         Uint128::from(1000000u128),
         expected_return_amount
@@ -955,7 +964,7 @@ fn try_token_to_native() {
             < 3i128
     );
     assert!(
-        (expected_commission_amount.u128() as i128
+        (expected_commission_amount.u128() as i128 + reward_stake_amount.u128() as i128
             - reverse_simulation_res.commission_amount.u128() as i128)
             .abs()
             < 3i128
@@ -1115,6 +1124,7 @@ fn test_query_pool() {
             },
         ],
         token_code_id: 10u64,
+        stake: Some("stake".to_string()),
     };
 
     let env = mock_env();
