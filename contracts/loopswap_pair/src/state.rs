@@ -1,8 +1,10 @@
 use cw_storage_plus::Item;
-use loopswap::asset::PairInfoRaw;
+use loopswap::asset::{Asset, PairInfoRaw};
 
 // put the length bytes at the first for compatibility with legacy singleton store
 pub const PAIR_INFO: Item<PairInfoRaw> = Item::new("\u{0}\u{9}pair_info");
+pub const REWARD_INFO: Item<Asset> = Item::new("reward_info");
+pub const REWARD2_INFO: Item<Asset> = Item::new("reward2_info");
 
 #[cfg(test)]
 mod test {

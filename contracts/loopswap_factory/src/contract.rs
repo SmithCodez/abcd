@@ -109,8 +109,8 @@ pub fn execute_update_pair_config(
     if deps.api.addr_canonicalize(info.sender.as_str())? != config.owner {
         return Err(StdError::generic_err("unauthorized"));
     }
-    Ok(Response::new()/*
-        .add_attributes(vec![
+    Ok(Response::new()
+        /*.add_attributes(vec![
             ("action", "update pair config"),
         ])
         .add_submessage(SubMsg {

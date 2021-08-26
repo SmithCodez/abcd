@@ -1,6 +1,6 @@
 use crate::error::ContractError;
 use crate::response::MsgInstantiateContractResponse;
-use crate::state::PAIR_INFO;
+use crate::state::{PAIR_INFO, REWARD_INFO, REWARD2_INFO};
 
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
@@ -44,6 +44,18 @@ pub fn instantiate(
     };
 
     PAIR_INFO.save(deps.storage, pair_info)?;
+
+    let asset1 = Asset {
+        info: msg.asset_infos[0].clone(),
+        amount: Uint128::zero(),
+    };
+    REWARD_INFO.save(deps.storage, &asset1)?;
+
+    let asset2 = Asset {
+        info: msg.asset_infos[1].clone(),
+        amount: Uint128::zero(),
+    };
+    REWARD2_INFO.save(deps.storage, &asset2)?;
 
     Ok(Response::new().add_submessage(SubMsg {
         // Create LP token
