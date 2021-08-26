@@ -1,10 +1,20 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use cw_storage_plus::Item;
 use loopswap::asset::{Asset, PairInfoRaw};
-
+use cosmwasm_std:: CanonicalAddr;
 // put the length bytes at the first for compatibility with legacy singleton store
+pub const CONFIG: Item<Config> = Item::new("config");
 pub const PAIR_INFO: Item<PairInfoRaw> = Item::new("\u{0}\u{9}pair_info");
 pub const REWARD_INFO: Item<Asset> = Item::new("reward_info");
 pub const REWARD2_INFO: Item<Asset> = Item::new("reward2_info");
+
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Config {
+    pub owner: CanonicalAddr,
+    pub stake: Option<String>,
+}
 
 #[cfg(test)]
 mod test {

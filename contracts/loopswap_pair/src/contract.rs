@@ -1,6 +1,6 @@
 use crate::error::ContractError;
 use crate::response::MsgInstantiateContractResponse;
-use crate::state::{PAIR_INFO, REWARD_INFO, REWARD2_INFO};
+use crate::state::{Config, CONFIG, PAIR_INFO, REWARD_INFO, REWARD2_INFO};
 
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
@@ -34,6 +34,13 @@ pub fn instantiate(
     _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> StdResult<Response> {
+    let config = Config {
+        owner: deps.api.addr_canonicalize(_info.sender.as_str())?,
+        stake: msg.stake,
+    };
+
+    CONFIG.save(deps.storage, &config)?;
+    
     let pair_info: &PairInfoRaw = &PairInfoRaw {
         contract_addr: deps.api.addr_canonicalize(env.contract.address.as_str())?,
         liquidity_token: CanonicalAddr::from(vec![]),
