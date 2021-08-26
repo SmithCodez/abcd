@@ -1,0 +1,2 @@
+cargo:rustc-env=TYPENUM_BUILD_CONSTS=/home/ubuntu/Documents/nn/terraswap/target/debug/build/typenum-f6d195b3ffce7585/out/consts.rs
+cargo:rustc-env=TYPENUM_BUILD_OP=/home/ubuntu/Documents/nn/terraswap/target/debug/build/typenum-f6d195b3ffce7585/out/op.rs
